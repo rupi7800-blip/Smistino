@@ -123,10 +123,18 @@
     busy.className = 'upd-busy';
     busy.textContent = 'Aggiornamento in corso…';
     document.body.appendChild(busy);
-    // 1) svuota le copie salvate della versione vecchia
-    var clear = window.caches ? caches.keys().then(function (k) { return Promise.all(k.map(function (n) { return caches.delete(n); })); }) : Promise.resolve();
-    // 2) scarica di nuovo dalla rete tutti i file dell'app (pagina, script, stili, icone)
     var page = location.href.split('#')[0].split('?')[0];
+    // 1) svuota le copie salvate della versione vecchia, solo di QUESTA app
+    //    (AgendApp, Smistino e Cartellina stanno sullo stesso indirizzo e ognuna ha le sue)
+    var mia = new URL('./', page).href;
+    var clear = window.caches ? caches.keys().then(function (k) {
+      return Promise.all(k.map(function (n) {
+        return caches.open(n).then(function (c) { return c.keys(); }).then(function (reqs) {
+          if (reqs.some(function (q) { return q.url.indexOf(mia) === 0; })) return caches.delete(n);
+        });
+      }));
+    }).catch(function () {}) : Promise.resolve();
+    // 2) scarica di nuovo dalla rete tutti i file dell'app (pagina, script, stili, icone)
     var urls = [page, new URL('index.html', page).href];
     Array.prototype.forEach.call(document.querySelectorAll('script[src],link[href]'), function (el) {
       var u = el.src || el.href;

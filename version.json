@@ -1,9 +1,11 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "date": "10/11/2026",
   "notes": [
-    "Prima versione di Smistino",
-    "Email illimitate (Gmail, Outlook, Libero, PEC…) e WhatsApp, Telegram, SMS e altre app in un posto solo",
-    "Smistamento automatico in sezioni che impara dalle tue scelte"
+    "Nuovo: Collega le app — Smistino lavora insieme ad AgendApp e Cartellina",
+    "Le scadenze trovate nei messaggi vanno in AgendApp; se le segni fatte lì, lo sa anche Smistino",
+    "Le email della sezione Salute vanno a Cartellina, e c'è il tasto \"Manda a Cartellina\" per le altre",
+    "I medici della rubrica di Cartellina finiscono sempre in Salute",
+    "Corretto: aggiornare un'app non cancella più la versione installata delle altre"
   ]
 }

@@ -120,7 +120,7 @@
       sezioni: Smista.SEZIONI_BASE.map(function (s) { var c = JSON.parse(JSON.stringify(s)); c.notifica = !s.silenziosa && s.id !== 'social'; return c; }),
       regole: { mittenti: {}, chat: {}, parole: {} },
       account: [], canali: JSON.parse(JSON.stringify(CANALI_BASE)),
-      msg: {}, scadenze: [], notificati: {},
+      msg: {}, scadenze: [], notificati: {}, ponteMitt: {},
       imp: { nome: '', intervallo: 10, giorni: 7, autoScadenze: true, imparaMittenti: true, promemoria: true, notifiche: true, ultimoCanale: 'whatsapp', viste: 0 }
     };
   }
@@ -165,6 +165,7 @@
       try { localStorage.setItem(KEY, JSON.stringify(D)); } catch (e) { pulisci(true); try { localStorage.setItem(KEY, JSON.stringify(D)); } catch (e2) { toast('Memoria piena: fai un backup e pulisci'); } }
     };
     if (subito) fai(); else tSave = setTimeout(fai, 300);
+    if (window.Ponte) Ponte.cambiato();
   }
   document.addEventListener('visibilitychange', function () { if (document.hidden) save(true); });
 
@@ -670,6 +671,7 @@
     var gm = account(m.fonte); if (gm && gm.tipo === 'inoltro') gm = account(gm.via);
     var gmailUrl = m.gid && !m.demo && gm && gm.tipo === 'gmail' ? 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(gm.indirizzo || '') + '#all/' + encodeURIComponent(m.gid) : '';
     h += '<div class="btns" style="margin-top:14px"><a class="btn" href="' + esc(rispondi) + '">' + IC.reply + 'Rispondi</a>' + (gmailUrl ? '<a class="btn sec" href="' + esc(gmailUrl) + '" target="_blank" rel="noopener">' + IC.mail + 'Apri in Gmail</a>' : '') + '</div>' +
+      ponteEmailHtml(m) +
       '<div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-act="stella" data-id="' + esc(m.id) + '">' + IC.star + (m.stella ? 'Togli importante' : 'Importante') + '</button><button class="btn ghost sm" data-act="nonLetto" data-id="' + esc(m.id) + '">' + IC.eye + 'Non letto</button><button class="btn danger sm" data-act="elimina" data-id="' + esc(m.id) + '">' + IC.trash + '</button></div>' +
       '<p class="src">Eliminare qui toglie il messaggio solo da Smistino, non dalla tua casella.</p>';
     sheet(esc(m.subject || '(senza oggetto)'), h);
@@ -712,6 +714,19 @@
     if (m.canale === 'sms') return '<a class="btn" style="background:#f97316" href="sms:' + esc(num) + '">' + IC.sms + 'Rispondi via SMS</a>';
     return '<button class="btn sec" data-act="copia" data-t="' + esc(m.body) + '">' + IC.copy + 'Copia testo</button>';
   }
+  function ponteEmailHtml(m) {
+    if (!window.Ponte || !Ponte.collegata('cartellina') || m.demo) return '';
+    if (m.sezione === 'salute' || m.aCartellina) return '<p class="small muted" style="margin:10px 2px 0">' + IC.share.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"') + ' Condivisa con Cartellina' + (m.aCartellina && m.sezione !== 'salute' ? ' · <button class="linkbtn small" data-act="aCartellina" data-id="' + esc(m.id) + '">annulla</button>' : '') + '</p>';
+    return '<div class="btns" style="margin-top:8px"><button class="btn sec sm" data-act="aCartellina" data-id="' + esc(m.id) + '" style="--c:#1f9a87">' + IC.share + 'Manda a Cartellina</button></div>';
+  }
+  ACT.aCartellina = function (el) {
+    var m = D.msg[el.dataset.id]; if (!m) return;
+    m.aCartellina = !m.aCartellina; save();
+    if (m.aCartellina && window.Ponte) Ponte.sincronizza(false);
+    toast(m.aCartellina ? 'Mandata a Cartellina ✓' : 'Non più condivisa');
+    chiudiSheet(); apriEmail(m.id);
+  };
+  ACT.ponte = function () { if (window.Ponte) Ponte.apri(); };
   ACT.stella = function (el) { var m = D.msg[el.dataset.id]; m.stella = !m.stella; save(); chiudiSheet(); apriEmail(m.id); ridisegnaSotto(); };
   ACT.nonLetto = function (el) { var m = D.msg[el.dataset.id]; m.letto = false; save(); chiudiSheet(true); ridisegna(); };
   ACT.elimina = function (el) { delete D.msg[el.dataset.id]; save(); chiudiSheet(true); ridisegna(); toast('Tolto da Smistino'); };
@@ -821,7 +836,7 @@
     h += '<button class="fab" data-act="nuovaScad" aria-label="Nuova">' + IC.plus + '</button>';
     v.innerHTML = h;
   };
-  ACT.fattoScad = function (el) { var s = D.scadenze.filter(function (x) { return x.id === el.dataset.id; })[0]; s.fatto = !s.fatto; save(); ridisegna(); };
+  ACT.fattoScad = function (el) { var s = D.scadenze.filter(function (x) { return x.id === el.dataset.id; })[0]; s.fatto = !s.fatto; s.fattoTs = Date.now(); save(); ridisegna(); };
   ACT.nuovaScad = function () { formScadenza({ data: ymd(new Date()), tipo: 'Scadenza' }); };
   ACT.apriScad = function (el) {
     var s = D.scadenze.filter(function (x) { return x.id === el.dataset.id; })[0]; if (!s) return;
@@ -1206,7 +1221,7 @@
   VIEWS.regole = function (v) {
     var rm = D.regole.mittenti, rc = D.regole.chat;
     var parole = Object.keys(D.regole.parole).reduce(function (n, k) { return n + Object.keys(D.regole.parole[k]).length; }, 0);
-    var riga = function (tipo, k, sid, label) { var s = sez(sid); return '<div class="toggle" style="padding:9px 0"><span class="grow ellipsis small"><b>' + esc(label) + '</b></span><span class="tag" style="background:' + s.colore + '1f;color:' + s.colore + '">' + esc(s.nome) + '</span><button class="linkbtn small" style="color:var(--danger);margin-left:8px" data-act="togliRegola" data-t="' + tipo + '" data-k="' + esc(k) + '">Togli</button></div>'; };
+    var riga = function (tipo, k, sid, label) { var s = sez(sid); return '<div class="toggle" style="padding:9px 0"><span class="grow ellipsis small"><b>' + esc(label) + '</b>' + (tipo === 'mittenti' && D.ponteMitt[k] ? ' <span class="muted">· da Cartellina</span>' : '') + '</span><span class="tag" style="background:' + s.colore + '1f;color:' + s.colore + '">' + esc(s.nome) + '</span><button class="linkbtn small" style="color:var(--danger);margin-left:8px" data-act="togliRegola" data-t="' + tipo + '" data-k="' + esc(k) + '">Togli</button></div>'; };
     var h = '<div class="page-head"><div><h1>Regole</h1><p>Quello che Smistino ha imparato da te</p></div></div>';
     h += '<div class="card"><h3>Mittenti e domini <span class="muted small">' + Object.keys(rm).length + '</span></h3>' + (Object.keys(rm).length ? Object.keys(rm).sort().map(function (k) { return riga('mittenti', k, rm[k], k); }).join('') : '<p class="small muted">Nessuna. Si creano quando sposti o confermi un\'email.</p>') +
       '<div class="row" style="margin-top:10px"><input class="inp grow" id="rgM" placeholder="indirizzo o dominio (es. enel.it)"><select class="inp" id="rgS" style="width:auto">' + sezAttive().map(function (s) { return '<option value="' + s.id + '">' + esc(s.nome) + '</option>'; }).join('') + '</select><button class="iconbtn" data-act="addRegola">' + IC.plus + '</button></div></div>';
@@ -1215,7 +1230,11 @@
     h += '<button class="btn sec block" data-act="riclassifica">' + IC.refresh + 'Ripassa i messaggi non confermati</button>';
     v.innerHTML = h;
   };
-  ACT.togliRegola = function (el) { delete D.regole[el.dataset.t][el.dataset.k]; save(); ridisegna(); };
+  ACT.togliRegola = function (el) {
+    var k = el.dataset.k;
+    if (D.ponteMitt[k] && window.Ponte) { Ponte.ignora('cartellina:mitt:' + k); delete D.ponteMitt[k]; }
+    delete D.regole[el.dataset.t][k]; save(); ridisegna();
+  };
   ACT.addRegola = function () {
     var k = $('#rgM').value.trim().toLowerCase().replace(/^@/, ''); if (!k) return;
     D.regole.mittenti[k] = $('#rgS').value; save();
@@ -1236,6 +1255,7 @@
       '<a href="#" data-act="incolla"><i style="background:#fff1e6;color:#c2410c">' + IC.copy + '</i><b>Incolla</b><small>Da qualsiasi app</small></a>' +
       '<a href="#/regole"><i style="background:#e0f2fe;color:#0369a1">' + IC.rules + '</i><b>Regole</b><small>Cosa ho imparato</small></a>' +
       '<a href="#/posta/stella"><i style="background:#fef3c7;color:#b45309">' + IC.star + '</i><b>Importanti</b><small>Messaggi con la stella</small></a>' +
+      '<a href="#" data-act="ponte"><i style="background:#e7f6ee;color:#167a4c">' + IC.share + '</i><b>Collega le app</b><small>' + (window.Ponte && Ponte.attivo() ? 'AgendApp e Cartellina collegate' : 'AgendApp e Cartellina') + '</small></a>' +
       '<a href="#/impostazioni"><i style="background:#eef0f6;color:var(--ink2)">' + IC.gear + '</i><b>Impostazioni</b><small>Notifiche, backup</small></a></div>' +
       '<div class="card" style="margin-top:14px"><h3>I tuoi messaggi restano tuoi</h3><p class="small muted" style="margin:6px 0 0">Tutto è salvato solo su questo telefono. Email e messaggi passano dagli script che crei tu sul tuo account Google: nessun server esterno. Fai ogni tanto un backup.</p></div>' +
       '<p class="disclaimer">Smistino v' + ((window.AppUpdate && window.AppUpdate.current) || '1.0.0') + '</p>';
@@ -1342,6 +1362,82 @@
   }
 
   // ---------------------------------------------------------
+  // Ponte: collaborazione con AgendApp e Cartellina
+  // ---------------------------------------------------------
+  var AREA = { lavoro: 'lavoro', persone: 'famiglia', salute: 'salute', banca: 'finanze', acquisti: 'personale', casa: 'casa', burocrazia: 'personale', studio: 'studio', sport: 'sport', viaggi: 'svago', account: 'personale', social: 'personale', promo: 'personale' };
+  function areaDi(sid) {
+    if (AREA[sid]) return AREA[sid];
+    var n = N(sez(sid).nome || '');
+    if (/auto|moto|mezz|veicol/.test(n)) return 'mezzi';
+    if (/cane|gatto|animal|veterin/.test(n)) return 'animali';
+    return 'altro';
+  }
+  function numImporto(t) { var n = parseFloat(String(t || '').replace(/[^\d,]/g, '').replace(',', '.')); return n > 0 ? n : ''; }
+  function pontePubblica() {
+    var lim = ymd(new Date(Date.now() - 30 * 864e5)), eventi = [], messaggi = [];
+    D.scadenze.forEach(function (s) {
+      if (!s.data || s.data < lim) return;
+      var m = D.msg[s.msgId];
+      if (m && m.demo) return;
+      var imp = m && m.estratto && (m.estratto.importi || [])[0];
+      var tipo = s.tipo === 'Appuntamento' ? 'appuntamento' : (imp && /banca|casa|burocrazia|acquisti/.test(s.sezione) ? 'pagamento' : 'scadenza');
+      var origine = m ? (m.tipo === 'chat' ? 'Messaggio ' + fonte(m).nome + ' · ' + m.chat : 'Email di ' + Smista.nomeMittente(m.from) + (m.subject ? ' — ' + m.subject : '')) : '';
+      eventi.push({ id: s.id, tipo: tipo, titolo: (s.tipo === 'Consegna' ? 'Consegna: ' : '') + s.titolo, data: s.data, ora: s.ora || '', note: [s.note, origine].filter(Boolean).join('\n'),
+        area: areaDi(s.sezione), importo: tipo === 'pagamento' ? numImporto(imp) : '', fatto: !!s.fatto, fattoTs: s.fattoTs || 0 });
+    });
+    // a Cartellina: i messaggi della sezione Salute e quelli che le mandi tu
+    var limM = Date.now() - 60 * 864e5;
+    tutti().filter(function (m) { return !m.mio && !m.demo && (m.sezione === 'salute' || m.aCartellina) && new Date(m.date).getTime() >= limM; })
+      .sort(function (a, b) { return new Date(b.date) - new Date(a.date); }).slice(0, 150).forEach(function (m) {
+        var chat = m.tipo === 'chat';
+        messaggi.push({ id: m.id, gid: m.gid || '', tipo: m.tipo, from: chat ? (m.da || m.chat) : m.from, subject: chat ? 'Messaggio ' + fonte(m).nome + ' da ' + m.chat : (m.subject || ''),
+          body: String(m.body || '').slice(0, 3500), date: m.date, labels: m.labels || [], attachments: m.attachments || [], scelta: !!m.aCartellina });
+      });
+    return { eventi: eventi, messaggi: messaggi };
+  }
+  function ponteRicevi(da, dati) {
+    var n = 0, parti = [];
+    if (da === 'cartellina') {
+      // i medici e gli ospedali di Cartellina finiscono sempre in Salute
+      var sal = D.sezioni.filter(function (s) { return s.id === 'salute' && !s.off; })[0], nuovi = 0;
+      if (sal) (dati.mittenti || []).forEach(function (a) {
+        a = String(a || '').trim().toLowerCase();
+        if (!a || D.regole.mittenti[a] || Ponte.ignorato('cartellina:mitt:' + a)) return;
+        if (a.indexOf('@') < 0 && DOMINI_LIBERI.indexOf(a) >= 0) return;
+        D.regole.mittenti[a] = 'salute'; D.ponteMitt[a] = 1; nuovi++;
+      });
+      if (nuovi) { var sp = riclassifica(true); n += nuovi; parti.push(nuovi + ' mittent' + (nuovi === 1 ? 'e' : 'i') + ' sanitar' + (nuovi === 1 ? 'io' : 'i') + (sp ? ', ' + sp + ' messaggi spostati' : '')); }
+    }
+    // stato "fatto" segnato nelle altre app (AgendApp)
+    var f = dati.fatti || {}, fatti = 0;
+    Object.keys(f).forEach(function (k) {
+      if (k.indexOf('smistino:') !== 0) return;
+      var s = D.scadenze.filter(function (x) { return x.id === k.slice(9); })[0], v = f[k];
+      if (!s || !v || (v.ts || 0) <= (s.fattoTs || 0) || !!v.f === !!s.fatto) return;
+      s.fatto = !!v.f; s.fattoTs = v.ts; fatti++;
+    });
+    if (fatti) { n += fatti; parti.push(fatti + ' scadenz' + (fatti === 1 ? 'a segnata' : 'e segnate') + ' come fatt' + (fatti === 1 ? 'a' : 'e')); }
+    if (n) save();
+    return { n: n, testo: parti.join(', ') };
+  }
+  function ponteScollega(da, prova) {
+    if (da !== 'cartellina') return 0;
+    var l = Object.keys(D.ponteMitt);
+    if (!prova && l.length) { l.forEach(function (k) { if (D.regole.mittenti[k] === 'salute') delete D.regole.mittenti[k]; }); D.ponteMitt = {}; riclassifica(true); save(); }
+    return l.length;
+  }
+  function avviaPonte() {
+    if (!window.Ponte) return;
+    Ponte.init({
+      app: 'smistino', pubblica: pontePubblica, ricevi: ponteRicevi, scollega: ponteScollega, dopo: ridisegna, toast: toast,
+      descr: {
+        agendapp: 'Riceve le scadenze, i pagamenti e gli appuntamenti che trovo nei messaggi. Se li segni fatti lì, lo so anch\'io.',
+        cartellina: 'Riceve le email e i messaggi della sezione Salute (e quelli che le mandi tu). Io imparo i suoi medici e ospedali.'
+      }
+    });
+  }
+
+  // ---------------------------------------------------------
   // Avvio
   // ---------------------------------------------------------
   var pollTimer = null;
@@ -1379,6 +1475,7 @@
     pulisci(false); save();
     gestisciParametri();
     route();
+    avviaPonte();
     setInterval(function () { controllaScadenze(new Date()); }, 30000);
     setTimeout(function () { controllaScadenze(new Date()); }, 1500);
     avviaPolling();
