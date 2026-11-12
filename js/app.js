@@ -975,6 +975,8 @@
         if (tipo === 'gmail') {
           var url = String(f.get('url') || '').trim();
           if (url && !/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) { toast('L\'URL deve iniziare con https://script.google.com/', 3500); return; }
+          if (url && /\/(edit|dev)(\?|#|$)|\/home\/projects\//.test(url)) { alert('Questo è l\'indirizzo dell\'editor, non dell\'app web.\n\nNello script premi "Esegui il deployment" → "Gestisci deployment" (o "Nuovo deployment" → App web, accesso: Chiunque) e copia l\'URL che finisce con /exec.'); return; }
+          if (url && !/\/exec(\?|$)/.test(url)) { toast('L\'URL dell\'app web deve finire con /exec', 4000); return; }
           if (url !== rec.url) rec.ultimo = 0;
           rec.url = url; rec.token = String(f.get('token') || '').trim(); rec.giorni = +f.get('giorni') || 7; rec.etichette = !!f.get('etichette'); rec.pausa = !!f.get('pausa'); rec.errore = '';
         } else if (tipo === 'inoltro') {
